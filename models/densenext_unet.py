@@ -6,6 +6,7 @@ from typing import List, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint as ckpt
 
 
 # ----------------------------- building blocks -----------------------------
@@ -68,11 +69,19 @@ class ConvNeXtV2Block(nn.Module):
         return x + residual
 
 class ConvNeXtStage(nn.Module):
-    def __init__(self, dim: int, depth: int, drop_path: float = 0.0):
+    def __init__(self, dim: int, depth: int, drop_path: float = 0.0, checkpoint: bool = False):
         super().__init__()
-        self.blocks = nn.Sequential(*[ConvNeXtV2Block(dim, drop_path) for _ in range(depth)])
+        self.blocks = nn.ModuleList([ConvNeXtV2Block(dim, drop_path) for _ in range(depth)])
+        self.checkpoint = checkpoint
 
-    def forward(self, x): return self.blocks(x)
+    def forward(self, x):
+        for blk in self.blocks:
+            if self.checkpoint and self.training:
+                x = ckpt(blk, x)
+            else:
+                x = blk(x)
+        return x
+
 
 class DownsampleCNX(nn.Module):
     """ConvNeXt-style downsample: LN2d + 2x2 stride-2 conv to change C and H,W."""
@@ -153,7 +162,8 @@ class DenseNeXtUNet(nn.Module):
                  bot_depth: int = 4,
                  stem_out: int = 48,
                  dims_cnx: Tuple[int, int, int, int] = (256, 384, 512, 640),
-                 drop_path: float = 0.0):
+                 drop_path: float = 0.0,
+                 use_checkpoint: bool = True):
         super().__init__()
         assert len(dense_layers) == 2, "Use two early Dense stages (0 and 1)."
         assert len(cnx_depths) == 3, "Use three ConvNeXt stages (2,3,4)."
@@ -174,25 +184,25 @@ class DenseNeXtUNet(nn.Module):
         self.down12 = DownsampleCNX(c1, dims_cnx[0])   # -> H/4, dims_cnx[0]
 
         # Encoder stage 2 (ConvNeXt)
-        self.enc2 = ConvNeXtStage(dims_cnx[0], cnx_depths[0], drop_path)
+        self.enc2 = ConvNeXtStage(dims_cnx[0], cnx_depths[0], drop_path, checkpoint=use_checkpoint)
 
         # Downsample
         self.down23 = DownsampleCNX(dims_cnx[0], dims_cnx[1])
 
         # Encoder stage 3 (ConvNeXt)
-        self.enc3 = ConvNeXtStage(dims_cnx[1], cnx_depths[1], drop_path)
+        self.enc3 = ConvNeXtStage(dims_cnx[1], cnx_depths[1], drop_path, checkpoint=use_checkpoint)
 
         # Downsample
         self.down34 = DownsampleCNX(dims_cnx[1], dims_cnx[2])
 
         # Encoder stage 4 (ConvNeXt)
-        self.enc4 = ConvNeXtStage(dims_cnx[2], cnx_depths[2], drop_path)
+        self.enc4 = ConvNeXtStage(dims_cnx[2], cnx_depths[2], drop_path, checkpoint=use_checkpoint)
 
         # Downsample to bottleneck
         self.down4b = DownsampleCNX(dims_cnx[2], dims_cnx[3])
 
         # Bottleneck (ConvNeXt)
-        self.bot = ConvNeXtStage(dims_cnx[3], bot_depth, drop_path)
+        self.bot = ConvNeXtStage(dims_cnx[3], bot_depth, drop_path, checkpoint=use_checkpoint)
 
         # Decoder (UNet-style)
         self.up_b4  = Up(dims_cnx[3], dims_cnx[2])        # 640 -> 512

@@ -14,7 +14,7 @@ except Exception:
 # ------------------------- Norm & ConvNeXt-v2 blocks -------------------------
 
 class LN2d(nn.Module):
-    """LayerNorm-2d via GroupNorm(1, C) — batch-size agnostic."""
+    '''LayerNorm-2d via GroupNorm(1, C) batch-size agnostic.'''
     def __init__(self, num_channels: int, eps: float = 1e-6):
         super().__init__()
         self.gn = nn.GroupNorm(1, num_channels, eps=eps, affine=True)

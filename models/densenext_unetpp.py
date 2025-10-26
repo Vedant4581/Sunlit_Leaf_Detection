@@ -240,7 +240,7 @@ class DenseNeXtUNetPP(nn.Module):
         L = 5
         for j in range(1, self.dec_depth + 1):
             for i in range(0, L - j):  # valid nodes satisfy i+j <= L-1
-                # up from deeper node at (i+1, j-1) → project to row_channels[i]
+                # up from deeper node at (i+1, j-1) ? project to row_channels[i]
                 iplus, jminus = i + 1, j - 1
                 in_up_ch  = self.row_channels[iplus]
                 out_row_ch = self.row_channels[i]
